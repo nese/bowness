@@ -51,7 +51,13 @@ func stripHeader(h http.Handler, header string) http.Handler {
 }
 
 func newReverseProxy(target *url.URL) http.Handler {
-	return stripHeader(httputil.NewSingleHostReverseProxy(target), "X-Forwarded-For")
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	originalDirector := proxy.Director
+	proxy.Director = func(req *http.Request) {
+		originalDirector(req)
+		req.Host = req.URL.Host
+	}
+	return stripHeader(proxy, "X-Forwarded-For")
 }
 
 func configuredSeconds(setting string) time.Duration {
