@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -57,6 +58,10 @@ func newReverseProxy(target *url.URL) http.Handler {
 		originalDirector(req)
 		req.Host = req.URL.Host
 	}
+	proxy.ErrorHandler = func(w http.ResponseWriter, req *http.Request, err error) {
+		log.Printf("Backend error: %s %s: %v", req.Method, req.URL.Path, err)
+		http.Error(w, "Bad Gateway", http.StatusBadGateway)
+	}
 	return stripHeader(proxy, "X-Forwarded-For")
 }
 
@@ -69,6 +74,17 @@ func waitForShutdownSignal() {
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 
 	<-signals
+}
+
+// filteredWriter suppresses the TLS handshake EOF errors logged by the NLB
+// health checks, which connect with plain TCP and have no client certificate.
+type filteredWriter struct{}
+
+func (filteredWriter) Write(p []byte) (int, error) {
+	if strings.Contains(string(p), "TLS handshake error") && strings.Contains(string(p), "EOF") {
+		return len(p), nil
+	}
+	return os.Stderr.Write(p)
 }
 
 // This is meant to be set at build time with -ldflags,
@@ -179,9 +195,15 @@ func main() {
 			HeaderName: viper.GetString(CNFAPIKeyHeader),
 			Key:        viper.GetString(CNFAPIKeyValue),
 		}
+		log.Printf("API key configured, injecting header: %s", viper.GetString(CNFAPIKeyHeader))
+	} else {
+		log.Printf("No API key configured, requests forwarded without authentication header")
 	}
 
 	srv := &http.Server{
+		// Suppress NLB health check TLS handshake noise.
+		ErrorLog: log.New(filteredWriter{}, "", log.LstdFlags),
+
 		// Wrap the HTTP handler with authentication middleware.
 		Handler: server.AuthMiddleware(proxyHandler, mdstore, apiKey),
 

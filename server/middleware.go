@@ -9,6 +9,7 @@ package server
 
 import (
 	"context"
+	"log"
 	"net/http"
 
 	"github.com/joesiltberg/bowness/fedtls"
@@ -95,6 +96,13 @@ func AuthMiddleware(h http.Handler, mdstore *fedtls.MetadataStore, apiKey *APIKe
 
 			if err != nil {
 				errorString = err.Error()
+				log.Printf("Auth denied: %v", err)
+			} else {
+				orgName := ""
+				if org != nil {
+					orgName = " (" + *org + ")"
+				}
+				log.Printf("Auth granted: %s%s", entityID, orgName)
 			}
 		}
 
